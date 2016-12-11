@@ -146,7 +146,7 @@ impl embedded_serial::BlockingTx for Uart {
 
     /// Emit a single octet, busy-waiting if the FIFO is full.
     /// Never returns `Err`.
-    fn putc(&mut self, value: u8) -> Result<(), Self::Error>{
+    fn putc(&mut self, value: u8) -> Result<(), Self::Error> {
         while (self.reg.rf.read() & reg::UART_FR_TXFF) != 0 {
             nop();
         }

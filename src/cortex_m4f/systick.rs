@@ -31,7 +31,7 @@ use cortex_m::peripheral as cm_periph;
 pub const SYSTICK_MAX: usize = (1 << 24) - 1;
 
 /// total number of times SysTick has wrapped
-pub static mut SYSTICK_WRAP_COUNT:usize = 0;
+pub static mut SYSTICK_WRAP_COUNT: usize = 0;
 
 // ****************************************************************************
 //
@@ -85,9 +85,7 @@ pub fn isr() {
 
 /// Returns how many times SysTick has overflowed.
 pub fn get_overflows() -> usize {
-    unsafe {
-        SYSTICK_WRAP_COUNT
-    }
+    unsafe { SYSTICK_WRAP_COUNT }
 }
 
 /// Gets the current SysTick value
