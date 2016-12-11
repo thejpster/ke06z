@@ -13,7 +13,6 @@ use embedded_serial::{self, BlockingTx, NonBlockingRx};
 use cortex_m::asm::nop;
 
 use super::gpio;
-use super::pll;
 use super::registers as reg;
 
 
@@ -37,8 +36,7 @@ pub enum UartId {
 pub struct Uart {
     id: UartId,
     baud: u32,
-    nl_mode: NewlineMode,
-    reg: &'static mut reg::UartRegisters,
+    nl_mode: NewlineMode, // reg: &'static mut reg::UartRegisters,
 }
 
 /// writeln!() emits LF chars, so this is useful
@@ -84,74 +82,28 @@ impl Uart {
         let mut uart = Uart {
             id: id,
             baud: baud,
-            nl_mode: nl_mode,
-            reg: get_uart_registers(id),
+            nl_mode: nl_mode, // reg: get_uart_registers(id),
         };
         uart.init();
         uart
     }
 
     /// Configure the hardware
-    fn init(&mut self) -> () {
-        // Do GPIO pin muxing
-        gpio::enable_uart(self.id);
-        // Enable UART module in RCGUART register p306
-        unsafe {
-            self.enable_clock();
-
-            // Disable UART and all features
-            self.reg.ctl.write(0);
-            // Calculate the baud rate values
-            // baud_div = CLOCK_RATE / (16 * baud_rate);
-            // baud_int = round(baud_div * 64)
-            let baud_int: u32 = (((pll::get_clock_hz() * 8) / self.baud) + 1) / 2;
-            // Store the upper and lower parts of the divider
-            self.reg.ibrd.write((baud_int / 64) as usize);
-            self.reg.fbrd.write((baud_int % 64) as usize);
-            // Set the UART Line Control register value
-            // 8N1 + FIFO enabled
-            self.reg.lcrh.write(reg::UART_LCRH_WLEN_8 | reg::UART_LCRH_FEN);
-            // Clear the flags
-            self.reg.rf.write(0);
-            // Enable
-            self.reg.ctl.write(reg::UART_CTL_RXE | reg::UART_CTL_TXE | reg::UART_CTL_UARTEN);
-        }
-    }
-
-    /// Select which bits to enable in the clock gating register
-    fn get_clock_gating_mask(&self) -> usize {
-        match self.id {
-            UartId::Uart0 => reg::SYSCTL_RCGCUART_R0,
-            UartId::Uart1 => reg::SYSCTL_RCGCUART_R1,
-            UartId::Uart2 => reg::SYSCTL_RCGCUART_R2,
-        }
-    }
-
-    /// Enable the module in the real-time clock gating registers.
-    unsafe fn enable_clock(&mut self) {
-        volatile_store(reg::SYSCTL_RCGCUART_R, self.get_clock_gating_mask());
-        while volatile_load(reg::SYSCTL_RCGCUART_R) != self.get_clock_gating_mask() {
-            nop();
-        }
-    }
-
-    #[deprecated]
-    pub fn read_single(&mut self) -> Option<u8> {
-        self.getc_try().ok()
-    }
+    fn init(&mut self) -> () {}
 }
 
 impl embedded_serial::BlockingTx for Uart {
-    type Error = !;
+    type Error = ();
 
     /// Emit a single octet, busy-waiting if the FIFO is full.
     /// Never returns `Err`.
     fn putc(&mut self, value: u8) -> Result<(), Self::Error> {
-        while (self.reg.rf.read() & reg::UART_FR_TXFF) != 0 {
-            nop();
-        }
-        self.reg.data.write(value as usize);
-        Ok(())
+        // while (self.reg.rf.read() & reg::UART_FR_TXFF) != 0 {
+        //     nop();
+        // }
+        // self.reg.data.write(value as usize);
+        // Ok(())
+        Err(())
     }
 }
 
@@ -161,11 +113,11 @@ impl embedded_serial::NonBlockingRx for Uart {
     /// Attempts to read from the UART. Returns `Err(())`
     /// if the FIFO is empty, or `Ok(octet)`.
     fn getc_try(&mut self) -> Result<u8, Self::Error> {
-        if (self.reg.rf.read() & reg::UART_FR_RXFE) != 0 {
-            Err(())
-        } else {
-            Ok(self.reg.data.read() as u8)
-        }
+        // if (self.reg.rf.read() & reg::UART_FR_RXFE) != 0 {
+        Err(())
+        // } else {
+        //     Ok(self.reg.data.read() as u8)
+        // }
     }
 }
 
@@ -201,16 +153,16 @@ pub unsafe extern "C" fn uart0_isr() {}
 //
 // ****************************************************************************
 
-/// Get a reference to the UART control register struct in the chip.
-fn get_uart_registers(uart_id: UartId) -> &'static mut reg::UartRegisters {
-    unsafe {
-        match uart_id {
-            UartId::Uart0 => &mut *(reg::UART0_DR_R as *mut reg::UartRegisters),
-            UartId::Uart1 => &mut *(reg::UART1_DR_R as *mut reg::UartRegisters),
-            UartId::Uart2 => &mut *(reg::UART2_DR_R as *mut reg::UartRegisters),
-        }
-    }
-}
+// /// Get a reference to the UART control register struct in the chip.
+// fn get_uart_registers(uart_id: UartId) -> &'static mut reg::UartRegisters {
+//     // unsafe {
+//     //     match uart_id {
+//     //         UartId::Uart0 => &mut *(reg::UART0_DR_R as *mut reg::UartRegisters),
+//     //         UartId::Uart1 => &mut *(reg::UART1_DR_R as *mut reg::UartRegisters),
+//     //         UartId::Uart2 => &mut *(reg::UART2_DR_R as *mut reg::UartRegisters),
+//     //     }
+//     // }
+// }
 
 // ****************************************************************************
 //

@@ -16,15 +16,11 @@ extern crate cortex_m;
 extern crate volatile_register;
 extern crate embedded_serial;
 
-pub mod gpio;
-pub mod pll;
-pub mod registers;
-pub mod uart;
-pub mod timer;
-pub mod systick;
 pub mod cortex_m4f;
-
-pub use cortex_m4f::fpu;
+pub mod gpio;
+pub mod registers;
+pub mod sim;
+pub mod uart;
 
 use cortex_m::asm::nop;
 

@@ -23,6 +23,10 @@ use super::uart::UartId;
 
 /// Describes a pin within a port
 /// This chip has 8 pins per port.
+///
+/// Internally it actually has three 32-bit ports, but
+/// we following the pin naming in the documentation, which is for
+/// nine 8-bit ports.
 #[derive(PartialEq, Clone, Copy)]
 #[allow(missing_docs)]
 pub enum Pin {
@@ -79,7 +83,14 @@ pub enum Level {
 //
 // ****************************************************************************
 
-// None
+enum InternalPort {
+    /// Ports A, B, C and D
+    Internal0,
+    /// Ports E, F, G and H
+    Internal1,
+    /// Port I
+    Internal2
+}
 
 // ****************************************************************************
 //
@@ -103,22 +114,20 @@ pub fn set_direction(pinport: PinPort, mode: PinMode) {
 
 /// Set the output value for an output pin
 pub fn set(pinport: PinPort, level: Level) {
-    let mask = get_pin_mask(pinport);
-    let gpio_reg = get_port_registers(pinport);
+    let (iport, mask) = get_internal(pinport);
     match level {
-        Level::Low => gpio_reg.data_mask[mask].write(0),
-        Level::High => gpio_reg.data_mask[mask].write(0xFF),
+        Level::High => iport.sor.write(mask),
+        Level::Low => iport.cor.write(mask),
     }
 }
 
 /// Read the level of an input pin
 pub fn read(pinport: PinPort) -> Level {
-    let mask = get_pin_mask(pinport);
-    let gpio_reg = get_port_registers(pinport);
-    if gpio_reg.data_mask[mask].read() == 0 {
-        Level::Low
-    } else {
+    let (iport, mask) = get_internal(pinport);
+    if iport.dir.read() & mask == mask {
         Level::High
+    } else {
+        Level::Low
     }
 }
 
@@ -127,87 +136,7 @@ pub fn read(pinport: PinPort) -> Level {
 ///
 /// Only Uart0 is supported at the moment, and it appears on
 /// A0 and A1.
-pub fn enable_uart(id: UartId) {
-    match id {
-        UartId::Uart0 => {
-            enable_port(PinPort::PortA(Pin::Pin0));
-            let gpio_reg = get_port_registers(PinPort::PortA(Pin::Pin1));
-            gpio_reg.afsel.modify(|r| r | (1 << 1) | (1 << 0));
-            gpio_reg.den.modify(|r| r | (1 << 1) | (1 << 0));
-            gpio_reg.pctl.modify(|r| {
-                (r & !(reg::GPIO_PCTL_PA0_M | reg::GPIO_PCTL_PA1_M)) |
-                (reg::GPIO_PCTL_PA0_U0RX | reg::GPIO_PCTL_PA1_U0TX)
-            });
-        }
-        UartId::Uart1 => {
-            unimplemented!();
-        }
-        UartId::Uart2 => {
-            unimplemented!();
-        }
-    }
-}
-
-/// Enable a pin as a Timer Compare pin (e.g. if you want to use it as
-/// a PWM output). We assume you've already set it as `PinMode::Peripheral`
-/// using `set_direction()`.
-pub fn enable_ccp(pinport: PinPort) {
-    let gpio_reg = get_port_registers(pinport);
-    enable_port(pinport);
-    match pinport {
-        PinPort::PortB(Pin::Pin0) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB0_M) | reg::GPIO_PCTL_PB0_T2CCP0);
-        }
-        PinPort::PortB(Pin::Pin1) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB1_M) | reg::GPIO_PCTL_PB1_T2CCP1);
-        }
-        PinPort::PortB(Pin::Pin2) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB2_M) | reg::GPIO_PCTL_PB2_T3CCP0);
-        }
-        PinPort::PortB(Pin::Pin3) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB3_M) | reg::GPIO_PCTL_PB3_T3CCP1);
-        }
-        PinPort::PortB(Pin::Pin4) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB4_M) | reg::GPIO_PCTL_PB4_T1CCP0);
-        }
-        PinPort::PortB(Pin::Pin5) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB5_M) | reg::GPIO_PCTL_PB5_T1CCP1);
-        }
-        PinPort::PortB(Pin::Pin6) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB6_M) | reg::GPIO_PCTL_PB6_T0CCP0);
-        }
-        PinPort::PortB(Pin::Pin7) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PB7_M) | reg::GPIO_PCTL_PB7_T0CCP1);
-        }
-        PinPort::PortC(Pin::Pin0) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PC0_M) | reg::GPIO_PCTL_PC0_T4CCP0);
-        }
-        PinPort::PortC(Pin::Pin1) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PC1_M) | reg::GPIO_PCTL_PC1_T4CCP1);
-        }
-        PinPort::PortC(Pin::Pin2) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PC2_M) | reg::GPIO_PCTL_PC2_T5CCP0);
-        }
-        PinPort::PortC(Pin::Pin3) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PC3_M) | reg::GPIO_PCTL_PC3_T5CCP1);
-        }
-        PinPort::PortF(Pin::Pin1) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PF1_M) | reg::GPIO_PCTL_PF1_T0CCP1);
-        }
-        PinPort::PortF(Pin::Pin2) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PF2_M) | reg::GPIO_PCTL_PF2_T1CCP0);
-        }
-        PinPort::PortF(Pin::Pin3) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PF3_M) | reg::GPIO_PCTL_PF3_T1CCP1);
-        }
-        PinPort::PortF(Pin::Pin4) => {
-            gpio_reg.pctl.modify(|r| (r & !reg::GPIO_PCTL_PF4_M) | reg::GPIO_PCTL_PF4_T2CCP0);
-        }
-        _ => {
-            unimplemented!();
-        }
-    }
-}
+pub fn enable_uart(_id: UartId) {}
 
 // ****************************************************************************
 //
@@ -215,9 +144,41 @@ pub fn enable_ccp(pinport: PinPort) {
 //
 // ****************************************************************************
 
+fn get_internal(pinport: PinPort) -> (&'static mut reg::GpioRegisters, u32) {
+    let mask = get_pin_mask(pinport);
+    match pinport {
+        PinPort::PortA(x) => (get_gpio_registers(InternalPort::Internal0), mask),
+        PinPort::PortB(x) => (get_gpio_registers(InternalPort::Internal0), mask << 8),
+        PinPort::PortC(x) => (get_gpio_registers(InternalPort::Internal0), mask << 16),
+        PinPort::PortD(x) => (get_gpio_registers(InternalPort::Internal0), mask << 24),
+        PinPort::PortE(x) => (get_gpio_registers(InternalPort::Internal1), mask),
+        PinPort::PortF(x) => (get_gpio_registers(InternalPort::Internal1), mask << 8),
+        PinPort::PortG(x) => (get_gpio_registers(InternalPort::Internal1), mask << 16),
+        PinPort::PortH(x) => (get_gpio_registers(InternalPort::Internal1), mask << 24),
+        PinPort::PortI(x) => (get_gpio_registers(InternalPort::Internal2), mask),
+    }
+}
+
+/// Convert a GPIO port into a reference to the registers which control that port
+fn get_gpio_registers(iport: InternalPort) -> &'static mut reg::GpioRegisters {
+    unsafe {
+        match iport {
+            InternalPort::Internal0 => &mut *(reg::GPIO0_BASE as *mut reg::GpioRegisters),
+            InternalPort::Internal1 => &mut *(reg::GPIO1_BASE as *mut reg::GpioRegisters),
+            InternalPort::Internal2 => &mut *(reg::GPIO2_BASE as *mut reg::GpioRegisters),
+        }
+    }
+}
+
+fn get_port_register() -> &'static mut reg::PortRegisters {
+    unsafe {
+        &mut *(reg::PORT_BASE as *mut reg::PortRegisters)
+    }
+}
+
 /// Convert a port to a bit mask
 /// Port A is 1, PortF is 32
-fn get_port_mask(port: PinPort) -> usize {
+fn get_port_mask(port: PinPort) -> u32 {
     match port {
         PinPort::PortA(_) => 1 << 0,
         PinPort::PortB(_) => 1 << 1,
@@ -231,21 +192,26 @@ fn get_port_mask(port: PinPort) -> usize {
     }
 }
 
+/// Get the pin from a pinport
+fn get_pin_from_pinport(pinport: PinPort) -> Pin {
+    match pinport {
+        PinPort::PortA(x) => x,
+        PinPort::PortB(x) => x,
+        PinPort::PortC(x) => x,
+        PinPort::PortD(x) => x,
+        PinPort::PortE(x) => x,
+        PinPort::PortF(x) => x,
+        PinPort::PortG(x) => x,
+        PinPort::PortH(x) => x,
+        PinPort::PortI(x) => x,
+    }
+}
+
 /// Convert a pin to a bit mask
 /// Pin0 is 0, Pin7 is 128
-fn get_pin_mask(pinport: PinPort) -> usize {
-    let pin = match pinport {
-        PinPort::PortA(ref x) => x,
-        PinPort::PortB(ref x) => x,
-        PinPort::PortC(ref x) => x,
-        PinPort::PortD(ref x) => x,
-        PinPort::PortE(ref x) => x,
-        PinPort::PortF(ref x) => x,
-        PinPort::PortG(ref x) => x,
-        PinPort::PortH(ref x) => x,
-        PinPort::PortI(ref x) => x,
-    };
-    match *pin {
+fn get_pin_mask(pinport: PinPort) -> u32 {
+    let pin = get_pin_from_pinport(pinport);
+    match pin {
         Pin::Pin0 => 1 << 0,
         Pin::Pin1 => 1 << 1,
         Pin::Pin2 => 1 << 2,
@@ -257,116 +223,57 @@ fn get_pin_mask(pinport: PinPort) -> usize {
     }
 }
 
-fn get_pctl_mask(pinport: PinPort) -> usize {
-    let pin = match pinport {
-        PinPort::PortA(ref x) => x,
-        PinPort::PortB(ref x) => x,
-        PinPort::PortC(ref x) => x,
-        PinPort::PortD(ref x) => x,
-        PinPort::PortE(ref x) => x,
-        PinPort::PortF(ref x) => x,
-        PinPort::PortG(ref x) => x,
-        PinPort::PortH(ref x) => x,
-        PinPort::PortI(ref x) => x,
-    };
-    match *pin {
-        Pin::Pin0 => 7 << 0 as usize,
-        Pin::Pin1 => 7 << 4 as usize,
-        Pin::Pin2 => 7 << 8 as usize,
-        Pin::Pin3 => 7 << 12 as usize,
-        Pin::Pin4 => 7 << 16 as usize,
-        Pin::Pin5 => 7 << 20 as usize,
-        Pin::Pin6 => 7 << 24 as usize,
-        Pin::Pin7 => 7 << 28 as usize,
-    }
-}
-
-fn enable_port(port: PinPort) {
-    let mask = get_port_mask(port);
-    unsafe {
-        volatile_store(reg::SYSCTL_RCGCGPIO_R, mask);
-        while volatile_load(reg::SYSCTL_RCGCGPIO_R) != mask {
-            nop();
-        }
-    }
-}
-
-fn force_gpio_periph(pinport: PinPort, gpio_reg: &mut reg::GpioRegisters) {
-    let mask = get_pin_mask(pinport);
-    let pctl_mask = get_pctl_mask(pinport);
-    gpio_reg.afsel.modify(|r| r & !mask);
-    gpio_reg.pctl.modify(|r| r & !pctl_mask);
-}
+/// Ports don't seem to need enabling here
+fn enable_port(_port: PinPort) {}
 
 fn make_input(pinport: PinPort) {
     enable_port(pinport);
-    let mask = get_pin_mask(pinport);
-    let gpio_reg = get_port_registers(pinport);
-    force_gpio_periph(pinport, gpio_reg);
-    if pinport == PinPort::PortF(Pin::Pin0) {
-        // The GPIO for button one is multiplexed with NMI so we
-        // have to 'unlock' it before we can use it
-        gpio_reg.lock.write(reg::GPIO_LOCK_KEY);
-        gpio_reg.cr.modify(|r| r | mask);
-        gpio_reg.lock.write(0);
-    }
-    gpio_reg.den.modify(|r| r | mask);
-    gpio_reg.dir.modify(|r| r & !mask);
+    let (iport, mask) = get_internal(pinport);
+    iport.ddr.modify(|x| x & !mask);
 }
 
-fn make_peripheral(pinport: PinPort) {
-    enable_port(pinport);
-    let mask = get_pin_mask(pinport);
-    let gpio_reg = get_port_registers(pinport);
-    gpio_reg.afsel.modify(|r| r | mask);
-    gpio_reg.den.modify(|r| r | mask);
-    gpio_reg.dir.modify(|r| r & !mask);
-}
+fn make_peripheral(pinport: PinPort) {}
 
 fn make_input_pullup(pinport: PinPort) {
-    make_input(pinport);
-    let mask = get_pin_mask(pinport);
-    let gpio_reg = get_port_registers(pinport);
-    gpio_reg.dr2r.modify(|r| r | mask);
-    gpio_reg.pur.modify(|r| r | mask);
+    enable_port(pinport);
+    let (iport, mask) = get_internal(pinport);
+    iport.ddr.modify(|x| x & !mask);
+    let port_reg = get_port_register();
+    match pinport {
+        PinPort::PortA(_) |
+        PinPort::PortB(_) |
+        PinPort::PortC(_) |
+        PinPort::PortD(_) => port_reg.pue0.modify(|x| x | mask),
+        PinPort::PortE(_) |
+        PinPort::PortF(_) |
+        PinPort::PortG(_) |
+        PinPort::PortH(_) => port_reg.pue1.modify(|x| x | mask),
+        PinPort::PortI(_) => port_reg.pue2.modify(|x| x | mask),
+    }
 }
 
 fn make_input_pulldown(pinport: PinPort) {
-    make_input(pinport);
-    let mask = get_pin_mask(pinport);
-    let gpio_reg = get_port_registers(pinport);
-    gpio_reg.dr2r.modify(|r| r | mask);
-    gpio_reg.pur.modify(|r| r & !mask);
+    enable_port(pinport);
+    let (iport, mask) = get_internal(pinport);
+    iport.ddr.modify(|x| x & !mask);
+    let port_reg = get_port_register();
+    match pinport {
+        PinPort::PortA(_) |
+        PinPort::PortB(_) |
+        PinPort::PortC(_) |
+        PinPort::PortD(_) => port_reg.pue0.modify(|x| x & !mask),
+        PinPort::PortE(_) |
+        PinPort::PortF(_) |
+        PinPort::PortG(_) |
+        PinPort::PortH(_) => port_reg.pue1.modify(|x| x & !mask),
+        PinPort::PortI(_) => port_reg.pue2.modify(|x| x & !mask),
+    }
 }
 
 fn make_output(pinport: PinPort, level: Level) {
     enable_port(pinport);
-    let mask = get_pin_mask(pinport);
-    let gpio_reg = get_port_registers(pinport);
-    force_gpio_periph(pinport, gpio_reg);
-    match level {
-        Level::Low => gpio_reg.data_mask[mask].write(0),
-        Level::High => gpio_reg.data_mask[mask].write(0xFF),
-    }
-    gpio_reg.dir.modify(|r| r | mask);
-    gpio_reg.den.modify(|r| r | mask);
-}
-
-/// Convert a GPIO port into a reference to the registers which control that port
-fn get_port_registers(port: PinPort) -> &'static mut reg::GpioRegisters {
-    unsafe {
-        match port {
-            PinPort::PortA(_) => &mut *(reg::GPIO_PORTA_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortB(_) => &mut *(reg::GPIO_PORTB_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortC(_) => &mut *(reg::GPIO_PORTC_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortD(_) => &mut *(reg::GPIO_PORTD_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortE(_) => &mut *(reg::GPIO_PORTE_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortF(_) => &mut *(reg::GPIO_PORTF_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortG(_) => &mut *(reg::GPIO_PORTF_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortH(_) => &mut *(reg::GPIO_PORTF_DATA_BITS_R as *mut reg::GpioRegisters),
-            PinPort::PortI(_) => &mut *(reg::GPIO_PORTF_DATA_BITS_R as *mut reg::GpioRegisters),
-        }
-    }
+    let (iport, mask) = get_internal(pinport);
+    iport.ddr.modify(|x| x | mask);
 }
 
 // ****************************************************************************
