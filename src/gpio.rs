@@ -8,10 +8,6 @@
 //
 // ****************************************************************************
 
-use core::intrinsics::{volatile_load, volatile_store};
-
-use cortex_m::asm::nop;
-
 use super::registers as reg;
 use super::uart::UartId;
 
@@ -89,7 +85,7 @@ enum InternalPort {
     /// Ports E, F, G and H
     Internal1,
     /// Port I
-    Internal2
+    Internal2,
 }
 
 // ****************************************************************************
@@ -145,72 +141,36 @@ pub fn enable_uart(_id: UartId) {}
 // ****************************************************************************
 
 fn get_internal(pinport: PinPort) -> (&'static mut reg::GpioRegisters, u32) {
-    let mask = get_pin_mask(pinport);
-    match pinport {
-        PinPort::PortA(x) => (get_gpio_registers(InternalPort::Internal0), mask),
-        PinPort::PortB(x) => (get_gpio_registers(InternalPort::Internal0), mask << 8),
-        PinPort::PortC(x) => (get_gpio_registers(InternalPort::Internal0), mask << 16),
-        PinPort::PortD(x) => (get_gpio_registers(InternalPort::Internal0), mask << 24),
-        PinPort::PortE(x) => (get_gpio_registers(InternalPort::Internal1), mask),
-        PinPort::PortF(x) => (get_gpio_registers(InternalPort::Internal1), mask << 8),
-        PinPort::PortG(x) => (get_gpio_registers(InternalPort::Internal1), mask << 16),
-        PinPort::PortH(x) => (get_gpio_registers(InternalPort::Internal1), mask << 24),
-        PinPort::PortI(x) => (get_gpio_registers(InternalPort::Internal2), mask),
-    }
+    let (iport, pin, shift) = match pinport {
+        PinPort::PortA(pin) => (InternalPort::Internal0, pin, 0),
+        PinPort::PortB(pin) => (InternalPort::Internal0, pin, 8),
+        PinPort::PortC(pin) => (InternalPort::Internal0, pin, 16),
+        PinPort::PortD(pin) => (InternalPort::Internal0, pin, 24),
+        PinPort::PortE(pin) => (InternalPort::Internal1, pin, 0),
+        PinPort::PortF(pin) => (InternalPort::Internal1, pin, 8),
+        PinPort::PortG(pin) => (InternalPort::Internal1, pin, 16),
+        PinPort::PortH(pin) => (InternalPort::Internal1, pin, 24),
+        PinPort::PortI(pin) => (InternalPort::Internal2, pin, 0),
+    };
+    (get_gpio_registers(iport), get_pin_mask(pin) << shift)
 }
 
 /// Convert a GPIO port into a reference to the registers which control that port
 fn get_gpio_registers(iport: InternalPort) -> &'static mut reg::GpioRegisters {
-    unsafe {
-        match iport {
-            InternalPort::Internal0 => &mut *(reg::GPIO0_BASE as *mut reg::GpioRegisters),
-            InternalPort::Internal1 => &mut *(reg::GPIO1_BASE as *mut reg::GpioRegisters),
-            InternalPort::Internal2 => &mut *(reg::GPIO2_BASE as *mut reg::GpioRegisters),
-        }
+    match iport {
+        InternalPort::Internal0 => reg::get_gpio0(),
+        InternalPort::Internal1 => reg::get_gpio1(),
+        InternalPort::Internal2 => reg::get_gpio2(),
     }
 }
 
 fn get_port_register() -> &'static mut reg::PortRegisters {
-    unsafe {
-        &mut *(reg::PORT_BASE as *mut reg::PortRegisters)
-    }
-}
-
-/// Convert a port to a bit mask
-/// Port A is 1, PortF is 32
-fn get_port_mask(port: PinPort) -> u32 {
-    match port {
-        PinPort::PortA(_) => 1 << 0,
-        PinPort::PortB(_) => 1 << 1,
-        PinPort::PortC(_) => 1 << 2,
-        PinPort::PortD(_) => 1 << 3,
-        PinPort::PortE(_) => 1 << 4,
-        PinPort::PortF(_) => 1 << 5,
-        PinPort::PortG(_) => 1 << 6,
-        PinPort::PortH(_) => 1 << 7,
-        PinPort::PortI(_) => 1 << 8,
-    }
-}
-
-/// Get the pin from a pinport
-fn get_pin_from_pinport(pinport: PinPort) -> Pin {
-    match pinport {
-        PinPort::PortA(x) => x,
-        PinPort::PortB(x) => x,
-        PinPort::PortC(x) => x,
-        PinPort::PortD(x) => x,
-        PinPort::PortE(x) => x,
-        PinPort::PortF(x) => x,
-        PinPort::PortG(x) => x,
-        PinPort::PortH(x) => x,
-        PinPort::PortI(x) => x,
-    }
+    unsafe { &mut *(reg::PORT_BASE as *mut reg::PortRegisters) }
 }
 
 /// Convert a pin to a bit mask
 /// Pin0 is 0, Pin7 is 128
-fn get_pin_mask(pinport: PinPort) -> u32 {
-    let pin = get_pin_from_pinport(pinport);
+fn get_pin_mask(pin: Pin) -> u32 {
     match pin {
         Pin::Pin0 => 1 << 0,
         Pin::Pin1 => 1 << 1,
@@ -232,7 +192,9 @@ fn make_input(pinport: PinPort) {
     iport.ddr.modify(|x| x & !mask);
 }
 
-fn make_peripheral(pinport: PinPort) {}
+fn make_peripheral(_pinport: PinPort) {
+    unimplemented!();
+}
 
 fn make_input_pullup(pinport: PinPort) {
     enable_port(pinport);
@@ -274,6 +236,10 @@ fn make_output(pinport: PinPort, level: Level) {
     enable_port(pinport);
     let (iport, mask) = get_internal(pinport);
     iport.ddr.modify(|x| x | mask);
+    match level {
+        Level::High => iport.sor.write(mask),
+        Level::Low => iport.cor.write(mask),
+    }
 }
 
 // ****************************************************************************

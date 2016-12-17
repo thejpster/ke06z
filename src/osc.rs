@@ -1,8 +1,4 @@
-//! CPU definitions for the Freescale Kinetis KE06Z
-
-#![feature(asm)]
-#![feature(never_type)]
-#![no_std]
+//! # Oscillator driver for the KE06Z
 
 // ****************************************************************************
 //
@@ -10,20 +6,7 @@
 //
 // ****************************************************************************
 
-#[macro_use]
-extern crate cortex_m;
-extern crate volatile_register;
-extern crate embedded_serial;
-
-pub mod cortex_m0;
-pub mod gpio;
-pub mod registers;
-pub mod sim;
-pub mod uart;
-pub mod ics;
-pub mod osc;
-
-use cortex_m::asm::nop;
+use super::registers as reg;
 
 // ****************************************************************************
 //
@@ -63,15 +46,12 @@ use cortex_m::asm::nop;
 //
 // ****************************************************************************
 
-/// Busy-waits for the given period.
-///
-/// Currently this function spins with a empirical number
-/// of NOPS per millisecond. It should really use a timer.
-///
-/// * `ms` - The period to wait, in milliseconds
-pub fn delay(ms: i32) {
-    for _ in 0..ms * 250 {
-        nop();
+/// Configure the oscillator to use an external crystal.
+pub fn init() {
+    let mut osc = reg::get_osc();
+    osc.cr.write(reg::OSC_CR_RANGE | reg::OSC_CR_OSCOS | reg::OSC_CR_OSCEN);
+    while (osc.cr.read() & reg::OSC_CR_OSCINIT) == 0 {
+
     }
 }
 

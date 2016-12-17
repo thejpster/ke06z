@@ -1,4 +1,4 @@
-//! # UART for the LM4F120H5QR
+//! # UART for the KE06Z
 
 // ****************************************************************************
 //
@@ -7,14 +7,10 @@
 // ****************************************************************************
 
 use core::fmt;
-use core::intrinsics::{volatile_load, volatile_store};
-
-use embedded_serial::{self, BlockingTx, NonBlockingRx};
 use cortex_m::asm::nop;
+use embedded_serial::{BlockingTx, NonBlockingRx};
 
-use super::gpio;
 use super::registers as reg;
-
 
 // ****************************************************************************
 //
@@ -34,9 +30,8 @@ pub enum UartId {
 /// Controls a single UART
 /// Only supports 8/N/1 - who needs anything else?
 pub struct Uart {
-    id: UartId,
-    baud: u32,
-    nl_mode: NewlineMode, // reg: &'static mut reg::UartRegisters,
+    nl_mode: NewlineMode,
+    reg: &'static mut reg::UartRegisters,
 }
 
 /// writeln!() emits LF chars, so this is useful
@@ -67,11 +62,21 @@ pub enum NewlineMode {
 
 // ****************************************************************************
 //
+// Private Data
+//
+// ****************************************************************************
+
+/// The Freedom board has an 8 MHz external oscillator
+/// We set the internal clock to 20 MHz
+const CLOCK_SPEED: u32 = 20_000_000;
+
+// ****************************************************************************
+//
 // Public Functions
 //
 // ****************************************************************************
 
-/// Represents a single UART on the LM4F120
+/// Represents a single UART on the KE06Z
 impl Uart {
     /// Create a new Uart object. The caller is responsible for ensuring
     /// that only one object exists per UartId. The UART is set to
@@ -80,44 +85,64 @@ impl Uart {
     /// - this will cause writeln!() to emit a CRLF.
     pub fn new(id: UartId, baud: u32, nl_mode: NewlineMode) -> Uart {
         let mut uart = Uart {
-            id: id,
-            baud: baud,
-            nl_mode: nl_mode, // reg: get_uart_registers(id),
+            nl_mode: nl_mode,
+            reg: get_uart_registers(id),
         };
-        uart.init();
+
+        // Enable the UART peripheral
+        reg::get_sim().scgc.modify(|x| {
+            x |
+            match id {
+                UartId::Uart0 => reg::SIM_SCGC_UART0,
+                UartId::Uart1 => reg::SIM_SCGC_UART1,
+                UartId::Uart2 => reg::SIM_SCGC_UART2,
+            }
+        });
+
+        // Stop it receiving or transmitting
+        uart.reg.c2.modify(|x| x & !(reg::UART_C2_TE | reg::UART_C2_RE));
+
+        // 8/N/1
+        uart.reg.c1.write(0);
+
+        // Set the baud rate
+        let baud_div = ((CLOCK_SPEED >> 4) + (baud / 2)) / baud;
+        uart.reg.bdh.write((baud_div >> 8) as u8);
+        uart.reg.bdl.write((baud_div & 0xFF) as u8);
+
+        // Turn the receiver and transmitter back on
+        uart.reg.c2.modify(|x| x | (reg::UART_C2_TE | reg::UART_C2_RE));
+
         uart
     }
-
-    /// Configure the hardware
-    fn init(&mut self) -> () {}
 }
 
-impl embedded_serial::BlockingTx for Uart {
+impl BlockingTx for Uart {
     type Error = ();
 
-    /// Emit a single octet, busy-waiting if the FIFO is full.
+    /// Emit a single octet, first busy-waiting if the data register
+    /// is not yet empty.
     /// Never returns `Err`.
     fn putc(&mut self, value: u8) -> Result<(), Self::Error> {
-        // while (self.reg.rf.read() & reg::UART_FR_TXFF) != 0 {
-        //     nop();
-        // }
-        // self.reg.data.write(value as usize);
-        // Ok(())
-        Err(())
+        while (self.reg.s1.read() & reg::UART_S1_TDRE) == 0 {
+            nop();
+        }
+        self.reg.data.write(value);
+        Ok(())
     }
 }
 
-impl embedded_serial::NonBlockingRx for Uart {
+impl NonBlockingRx for Uart {
     type Error = ();
 
     /// Attempts to read from the UART. Returns `Err(())`
-    /// if the FIFO is empty, or `Ok(octet)`.
+    /// if the data register isn't full, or `Ok(octet)`.
     fn getc_try(&mut self) -> Result<u8, Self::Error> {
-        // if (self.reg.rf.read() & reg::UART_FR_RXFE) != 0 {
-        Err(())
-        // } else {
-        //     Ok(self.reg.data.read() as u8)
-        // }
+        if (self.reg.s1.read() & reg::UART_S1_RDRF) == 0 {
+            Err(())
+        } else {
+            Ok(self.reg.data.read())
+        }
     }
 }
 
@@ -153,16 +178,14 @@ pub unsafe extern "C" fn uart0_isr() {}
 //
 // ****************************************************************************
 
-// /// Get a reference to the UART control register struct in the chip.
-// fn get_uart_registers(uart_id: UartId) -> &'static mut reg::UartRegisters {
-//     // unsafe {
-//     //     match uart_id {
-//     //         UartId::Uart0 => &mut *(reg::UART0_DR_R as *mut reg::UartRegisters),
-//     //         UartId::Uart1 => &mut *(reg::UART1_DR_R as *mut reg::UartRegisters),
-//     //         UartId::Uart2 => &mut *(reg::UART2_DR_R as *mut reg::UartRegisters),
-//     //     }
-//     // }
-// }
+/// Get a reference to the UART control register struct in the chip.
+fn get_uart_registers(uart_id: UartId) -> &'static mut reg::UartRegisters {
+    match uart_id {
+        UartId::Uart0 => reg::get_uart0(),
+        UartId::Uart1 => reg::get_uart1(),
+        UartId::Uart2 => reg::get_uart2(),
+    }
+}
 
 // ****************************************************************************
 //

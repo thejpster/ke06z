@@ -41,7 +41,7 @@ pub enum ClockGatingPeripheral {
     Fmt0,
     Pwt,
     Pit,
-    Rtc
+    Rtc,
 }
 
 // ****************************************************************************
@@ -74,9 +74,7 @@ pub enum ClockGatingPeripheral {
 //
 // ****************************************************************************
 
-pub fn init() {
-
-}
+pub fn init() {}
 
 pub fn power_enable(peripheral: ClockGatingPeripheral) {
     power_control(peripheral, true)
@@ -135,9 +133,7 @@ pub fn power_control(peripheral: ClockGatingPeripheral, enable: bool) {
 // ****************************************************************************
 
 fn registers() -> &'static mut reg::SimRegisters {
-    unsafe {
-        &mut *(0x40048000 as *mut reg::SimRegisters)
-    }
+    unsafe { &mut *(0x40048000 as *mut reg::SimRegisters) }
 }
 
 // ****************************************************************************
