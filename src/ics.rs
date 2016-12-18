@@ -48,22 +48,24 @@ use super::osc;
 //
 // ****************************************************************************
 
-/// Configure the chip to run in Fully Engaged External mode at 20 MHz.
+/// Configure the chip to run in Fully Engaged External mode at 40 MHz.
 ///
 /// It's the only mode we support at the moment. It assumes an 8 MHz crystal.
 /// We also set the clock to divide by 2.
+///
+/// This sequence is taken from the data sheet section 20.5.3.1
 pub fn init() {
     let mut ics = reg::get_ics();
+    let mut sim = reg::get_sim();
 
     // Initialise oscillator
     osc::init();
 
-    // Set the divider for the external clock to get it in range
-    // 20 MHz / 512 = 39062.5 Hz
-    ics.c1.modify(|x| (x & !reg::ICS_C1_RDIV) | reg::ics_c1_rdiv(4));
+    // bdiv = divide by 2
+    ics.c2.write(0x20);
 
-    // Change reference clock to external
-    ics.c1.modify(|x| x & !reg::ICS_C1_IREFS);
+    // Set the divider for the external clock to get it in range
+    ics.c1.write(0x18);
 
     // Sleep for a bit
     nop();
@@ -79,11 +81,11 @@ pub fn init() {
 
     }
 
-    // Set multiplier
-    ics.c2.modify(|x| (x & !reg::ICS_C2_BDIV) | reg::ics_c2_bdiv(0));
+    // core clock = ICSOUT/1; bus clock = core clock / 2
+    sim.clkdiv.write(0x01100000);
 
-    // Clear loss of lock sticky bit
-    ics.status.modify(|x| x & reg::ICS_STATUS_LOLS);
+    // bdiv = divide by 1
+    ics.c2.write(0x00);
 }
 
 // ****************************************************************************
